@@ -86,10 +86,10 @@ internal class GameTaskManager
         {
             TriggerDictionary.TryAdd("AutoPick", new AutoPick.AutoPickTrigger(externalConfig as AutoPickExternalConfig));
         }
-        // else if (name == "AutoSkip")
-        // {
-        //     TriggerDictionary.Add("AutoSkip", new AutoSkip.AutoSkipTrigger());
-        // }
+        else if (name == "AutoSkip")
+        {
+            TriggerDictionary.TryAdd("AutoSkip", new AutoSkip.AutoSkipTrigger());
+        }
         // else if (name == "AutoFish")
         // {
         //     TriggerDictionary.Add("AutoFish", new AutoFishing.AutoFishingTrigger());
@@ -104,7 +104,7 @@ internal class GameTaskManager
             TriggerDictionary.GetValueOrDefault("AutoSkip")?.Init();
             TriggerDictionary.GetValueOrDefault("AutoFish")?.Init();
             TriggerDictionary.GetValueOrDefault("QuickTeleport")?.Init();
-            TriggerDictionary.GetValueOrDefault("GameLoading")?.Init();
+            // TriggerDictionary.GetValueOrDefault("GameLoading")?.Init();
             TriggerDictionary.GetValueOrDefault("AutoCook")?.Init();
             // 清理画布
             WeakReferenceMessenger.Default.Send(new PropertyChangedMessage<object>(new object(), "RemoveAllButton", new object(), ""));
@@ -125,6 +125,7 @@ internal class GameTaskManager
         ElementAssets.DestroyInstance();
         QuickSereniteaPotAssets.DestroyInstance();
         GameLoadingAssets.DestroyInstance();
+        MapLazyAssets.DestroyInstance();
     }
 
     /// <summary>

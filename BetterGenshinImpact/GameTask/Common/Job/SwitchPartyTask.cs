@@ -36,7 +36,7 @@ public class SwitchPartyTask
             }
 
             Simulation.SendInput.Keyboard.KeyPress(User32.VK.VK_L);
-            await Delay(3000, ct); // 加载2s
+            await Delay(1000, ct); // 加载2s // 由于胡桃可以不等待直接进入，所以这里只等待1s
         }
 
         if (await Bv.WaitForPartyViewUi(ct))
@@ -62,6 +62,9 @@ public class SwitchPartyTask
             if (currTeamName == partyName)
             {
                 Logger.LogInformation("切换队伍，当前队伍[{Name}]即为目标队伍，无需切换", partyName);
+                Simulation.SendInput.Keyboard.KeyPress(User32.VK.VK_ESCAPE);
+                await Delay(500, ct);
+                await _returnMainUiTask.Start(ct);
                 return true;
             }
 

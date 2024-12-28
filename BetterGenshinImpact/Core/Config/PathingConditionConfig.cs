@@ -4,11 +4,8 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
-using System.Collections.Specialized;
 using System.Globalization;
 using System.Linq;
-using Microsoft.Extensions.Logging;
-using static BetterGenshinImpact.GameTask.Common.TaskControl;
 
 namespace BetterGenshinImpact.Core.Config;
 
@@ -21,6 +18,34 @@ public partial class PathingConditionConfig : ObservableObject
 
     [ObservableProperty]
     private ObservableCollection<Condition> _avatarConditions = [];
+    
+    // 只在传送传送点时复活
+    [ObservableProperty]
+    private bool _onlyInTeleportRecover = false;
+    
+    // 使用小道具的间隔时间(ms)
+    [ObservableProperty]
+    private int _useGadgetIntervalMs = 0;
+
+    public static PathingConditionConfig Default => new()
+    {
+        AvatarConditions =
+        [
+            new Condition
+            {
+                Subject = "队伍中角色",
+                Object = ["绮良良", "莱依拉", "芭芭拉", "七七"],
+                Result = "循环短E"
+            },
+
+            new Condition
+            {
+                Subject = "队伍中角色",
+                Object = ["钟离"],
+                Result = "循环长E"
+            }
+        ]
+    };
 
     /// <summary>
     /// 找出当前应该切换的队伍名称
@@ -28,7 +53,7 @@ public partial class PathingConditionConfig : ObservableObject
     /// <param name="materialName">采集物名称</param>
     /// <param name="specialActions">特殊动作</param>
     /// <returns></returns>
-    public string? FilterPartyName(string materialName, List<string?> specialActions)
+    public string? FilterPartyName(string? materialName, List<string?> specialActions)
     {
         if (specialActions is { Count: > 0 })
         {
@@ -54,7 +79,11 @@ public partial class PathingConditionConfig : ObservableObject
         }
 
         // 采集物匹配队伍名
-        var materialCondition = PartyConditions.FirstOrDefault(c => c.Subject == "采集物" && c.Object.Contains(materialName));
+        Condition? materialCondition = null;
+        if (!string.IsNullOrEmpty(materialName))
+        {
+            materialCondition = PartyConditions.FirstOrDefault(c => c.Subject == "采集物" && c.Object.Contains(materialName));
+        }
         if (materialCondition is { Result: not null })
         {
             return materialCondition.Result;
@@ -77,7 +106,7 @@ public partial class PathingConditionConfig : ObservableObject
     /// <returns></returns>
     public PathingPartyConfig BuildPartyConfigByCondition(CombatScenes combatScenes)
     {
-        PathingPartyConfig partyConfig = new();
+        PathingPartyConfig partyConfig = PathingPartyConfig.BuildDefault();
         // 使用最优先匹配上的条件
         foreach (var avatarCondition in AvatarConditions)
         {
@@ -111,7 +140,7 @@ public partial class PathingConditionConfig : ObservableObject
 
         foreach (var avatarCondition in AvatarConditions)
         {
-            if (avatarCondition.Result == "作为主要行走人员")
+            if (avatarCondition.Result == "作为主要行走角色")
             {
                 foreach (var avatar in combatScenes.Avatars)
                 {

@@ -21,9 +21,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BetterGenshinImpact.Core.Recognition;
+using BetterGenshinImpact.GameTask.AutoTrackPath;
 using BetterGenshinImpact.GameTask.Common.BgiVision;
+using BetterGenshinImpact.GameTask.Common.Element.Assets;
+using BetterGenshinImpact.GameTask.Common.Job;
 using Vanara.PInvoke;
 using static BetterGenshinImpact.GameTask.Common.TaskControl;
 using static Vanara.PInvoke.Kernel32;
@@ -69,6 +74,11 @@ public class AutoDomainTask : ISoloTask
         AutoFightAssets.DestroyInstance();
         Init();
         NotificationHelper.SendTaskNotificationWithScreenshotUsing(b => b.Domain().Started().Build()); // TODO: 通知后续需要删除迁移
+
+        // 传送到秘境
+        await TpDomain();
+        // 切换队伍
+        await SwitchParty(_taskParam.PartyName);
 
         var combatScenes = new CombatScenes().InitializeTeam(CaptureToRectArea());
 
@@ -116,11 +126,19 @@ public class AutoDomainTask : ISoloTask
                 {
                     Logger.LogInformation("体力已经耗尽，结束自动秘境");
                 }
+
                 NotificationHelper.SendTaskNotificationWithScreenshotUsing(b => b.Domain().Success().Build());
                 break;
             }
+
             NotificationHelper.SendTaskNotificationWithScreenshotUsing(b => b.Domain().Progress().Build());
         }
+
+        await Delay(2000, ct);
+        await Bv.WaitForMainUi(_ct, 30);
+        await Delay(2000, ct);
+
+        await ArtifactSalvage();
     }
 
     private void Init()
@@ -141,8 +159,9 @@ public class AutoDomainTask : ISoloTask
         var gameScreenSize = SystemControl.GetGameScreenRect(TaskContext.Instance().GameHandle);
         if (gameScreenSize.Width * 9 != gameScreenSize.Height * 16)
         {
-            Logger.LogWarning("游戏窗口分辨率不是 16:9 ！当前分辨率为 {Width}x{Height} , 非 16:9 分辨率的游戏可能无法正常使用自动秘境功能 !", gameScreenSize.Width, gameScreenSize.Height);
+            Logger.LogError("游戏窗口分辨率不是 16:9 ！当前分辨率为 {Width}x{Height} , 非 16:9 分辨率的游戏无法正常使用自动秘境功能 !", gameScreenSize.Width, gameScreenSize.Height);
         }
+
         if (gameScreenSize.Width < 1920 || gameScreenSize.Height < 1080)
         {
             Logger.LogWarning("游戏窗口分辨率小于 1920x1080 ！当前分辨率为 {Width}x{Height} , 小于 1920x1080 的分辨率的游戏可能无法正常使用自动秘境功能 !", gameScreenSize.Width, gameScreenSize.Height);
@@ -161,10 +180,58 @@ public class AutoDomainTask : ISoloTask
         }
     }
 
+    private async Task TpDomain()
+    {
+        // 传送到秘境
+        if (!string.IsNullOrEmpty(_taskParam.DomainName))
+        {
+            if (MapLazyAssets.Instance.DomainPositionMap.TryGetValue(_taskParam.DomainName, out var domainPosition))
+            {
+                Logger.LogInformation("自动秘境：传送到秘境{Text}", _taskParam.DomainName);
+                await new TpTask(_ct).Tp(domainPosition.X, domainPosition.Y);
+                await Delay(1000, _ct);
+                await Bv.WaitForMainUi(_ct);
+                await Delay(1000, _ct);
+                var walkKey = User32.VK.VK_W;
+                if (MapLazyAssets.Instance.DomainBackwardList.Contains(_taskParam.DomainName))
+                {
+                    walkKey = User32.VK.VK_S;
+                }
+
+                Simulation.SendInput.Keyboard.KeyDown(walkKey);
+                Thread.Sleep(3500);
+                Simulation.SendInput.Keyboard.KeyUp(walkKey);
+            }
+            else
+            {
+                Logger.LogError("自动秘境：未找到对应的秘境{Text}的传送点", _taskParam.DomainName);
+                throw new Exception($"未找到对应的秘境{_taskParam.DomainName}的传送点");
+            }
+        }
+    }
+
+    /// <summary>
+    /// 切换队伍
+    /// </summary>
+    /// <param name="partyName"></param>
+    /// <returns></returns>
+    private async Task<bool> SwitchParty(string? partyName)
+    {
+        if (!string.IsNullOrEmpty(partyName))
+        {
+            var b = await new SwitchPartyTask().Start(partyName, _ct);
+            await Delay(500, _ct);
+            return b;
+        }
+
+        return true;
+    }
+
     private void EnterDomain()
     {
         var fightAssets = AutoFightContext.Instance.FightAssets;
 
+        // 进入秘境
         using var fRectArea = CaptureToRectArea().Find(AutoPickAssets.Instance.FRo);
         if (!fRectArea.IsEmpty())
         {
@@ -388,6 +455,7 @@ public class AutoDomainTask : ISoloTask
             {
                 return;
             }
+
             if (!IsTakeFood())
             {
                 Logger.LogInformation("未装备 “{Tool}”，不启用红血自动吃药功能", "便携营养袋");
@@ -631,40 +699,12 @@ public class AutoDomainTask : ISoloTask
             while (!cts.Token.IsCancellationRequested)
             {
                 using var captureRegion = CaptureToRectArea();
-                var angle = CameraOrientation.Compute(captureRegion.SrcGreyMat);
+                var angle = CameraOrientation.Compute(captureRegion.SrcMat);
                 CameraOrientation.DrawDirection(captureRegion, angle);
                 if (angle is >= 356 or <= 4)
                 {
                     // 算作对准了
                     continuousCount++;
-                }
-
-                if (angle <= 180)
-                {
-                    // 左移视角
-                    var moveAngle = angle;
-                    if (moveAngle > 2)
-                    {
-                        moveAngle *= 2;
-                    }
-
-                    Simulation.SendInput.Mouse.MoveMouseBy(-moveAngle, 0);
-                    continuousCount = 0;
-                }
-                else if (angle is > 180 and < 360)
-                {
-                    // 右移视角
-                    var moveAngle = 360 - angle;
-                    if (moveAngle > 2)
-                    {
-                        moveAngle *= 2;
-                    }
-
-                    Simulation.SendInput.Mouse.MoveMouseBy(moveAngle, 0);
-                    continuousCount = 0;
-                }
-                else
-                {
                     // 360 度 东方向视角
                     if (continuousCount > 5)
                     {
@@ -674,6 +714,33 @@ public class AutoDomainTask : ISoloTask
                             moveAvatarTask.Start();
                         }
                     }
+                }
+                else
+                {
+                    continuousCount = 0;
+                }
+
+                if (angle <= 180)
+                {
+                    // 左移视角
+                    var moveAngle = (int)Math.Round(angle);
+                    if (moveAngle > 2)
+                    {
+                        moveAngle *= 2;
+                    }
+
+                    Simulation.SendInput.Mouse.MoveMouseBy(-moveAngle, 0);
+                }
+                else if (angle is > 180 and < 360)
+                {
+                    // 右移视角
+                    var moveAngle = 360 - (int)Math.Round(angle);
+                    if (moveAngle > 2)
+                    {
+                        moveAngle *= 2;
+                    }
+
+                    Simulation.SendInput.Mouse.MoveMouseBy(moveAngle, 0);
                 }
 
                 Sleep(100);
@@ -721,17 +788,31 @@ public class AutoDomainTask : ISoloTask
 
         Sleep(1000, _ct);
 
-        var captureArea = TaskContext.Instance().SystemInfo.CaptureAreaRect;
+        var hasSkip = false;
+        var captureArea = TaskContext.Instance().SystemInfo.ScaleMax1080PCaptureRect;
+        var assetScale = TaskContext.Instance().SystemInfo.AssetScale;
         for (var i = 0; i < 30; i++)
         {
             // 跳过领取动画
-            GameCaptureRegion.GameRegionClick((size, scale) => (size.Width - 140 * scale, 53 * scale));
-            Sleep(200, _ct);
-            GameCaptureRegion.GameRegionClick((size, scale) => (size.Width - 140 * scale, 53 * scale));
+            if (!hasSkip)
+            {
+                TaskContext.Instance().PostMessageSimulator.LeftButtonClick(); // 先随便点一个地方使得跳过出现
+            }
+
+            using var ra = CaptureToRectArea();
+
+            // OCR识别是否有跳过
+            var ocrList = ra.FindMulti(RecognitionObject.Ocr(captureArea.Width - 230 * assetScale, 0, 230 * assetScale - 5, 80 * assetScale));
+            var skipTextRa = ocrList.FirstOrDefault(t => t.Text.Contains("跳过"));
+            if (skipTextRa != null)
+            {
+                hasSkip = true;
+                skipTextRa.Click(); // 有则点击
+            }
+
 
             // 优先点击继续
-            var ra = CaptureToRectArea();
-            var confirmRectArea = ra.Find(AutoFightContext.Instance.FightAssets.ConfirmRa);
+            using var confirmRectArea = ra.Find(AutoFightContext.Instance.FightAssets.ConfirmRa);
             if (!confirmRectArea.IsEmpty())
             {
                 if (isLastTurn)
@@ -808,5 +889,20 @@ public class AutoDomainTask : ISoloTask
 
         Logger.LogInformation("剩余：浓缩树脂 {CondensedResinCount} 脆弱树脂 {FragileResinCount}", condensedResinCount, fragileResinCount);
         return (condensedResinCount, fragileResinCount);
+    }
+
+    private async Task ArtifactSalvage()
+    {
+        if (!_taskParam.AutoArtifactSalvage)
+        {
+            return;
+        }
+
+        if (!int.TryParse(_taskParam.MaxArtifactStar, out var star))
+        {
+            star = 4;
+        }
+
+        await new ArtifactSalvageTask().Start(star, _ct);
     }
 }

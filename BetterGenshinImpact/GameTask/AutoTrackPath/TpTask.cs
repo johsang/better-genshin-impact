@@ -28,13 +28,12 @@ namespace BetterGenshinImpact.GameTask.AutoTrackPath;
 public class TpTask(CancellationToken ct)
 {
     private readonly QuickTeleportAssets _assets = QuickTeleportAssets.Instance;
-
     private readonly Rect _captureRect = TaskContext.Instance().SystemInfo.ScaleMax1080PCaptureRect;
-
     private readonly double _zoomOutMax1080PRatio = TaskContext.Instance().SystemInfo.ZoomOutMax1080PRatio;
 
     public static double ReviveStatueOfTheSevenPointX = 2296.4;
     public static double ReviveStatueOfTheSevenPointY = -824.4;
+    public static int currentZoomLevel = 4;
 
     /// <summary>
     /// 通过大地图传送到指定坐标最近的传送点，然后移动到指定坐标
@@ -42,31 +41,25 @@ public class TpTask(CancellationToken ct)
     /// <param name="tpX"></param>
     /// <param name="tpY"></param>
     /// <param name="force">强制以当前的tpX,tpY坐标进行自动传送</param>
-    public async Task<(double, double)> TpOnce(double tpX, double tpY, bool force = false)
+    public async Task<(double, double)> TpOnce(double tpX, double tpY, bool force = false, int initialZoomLevel = 4)
     {
         var (x, y) = (tpX, tpY);
-
+        string? country = null;
         if (!force)
         {
             // 获取最近的传送点位置
-            (x, y) = GetRecentlyTpPoint(tpX, tpY);
+            (x, y, country) = GetRecentlyTpPoint(tpX, tpY);
             Logger.LogDebug("({TpX},{TpY}) 最近的传送点位置 ({X},{Y})", $"{tpX:F1}", $"{tpY:F1}", $"{x:F1}", $"{y:F1}");
         }
 
-        // M 打开地图识别当前位置，中心点为当前位置
-        using var ra1 = CaptureToRectArea();
-        if (!Bv.IsInBigMapUi(ra1))
-        {
-            Simulation.SendInput.Keyboard.KeyPress(User32.VK.VK_M);
-            await Delay(1000, ct);
-        }
 
         // 计算传送点位置离哪个地图切换后的中心点最近，切换到该地图
-        await SwitchRecentlyCountryMap(x, y);
+        await SwitchRecentlyCountryMap(x, y, country);
 
         // 计算坐标后点击
+
         var bigMapInAllMapRect = GetBigMapRect();
-        while (!IsPointInBigMapWindow(bigMapInAllMapRect, x, y)) // 左上角 350x400也属于禁止点击区域
+        while (!IsPointInBigMapWindow(bigMapInAllMapRect, x, y) || currentZoomLevel > 2) // 左上角 350x400也属于禁止点击区域
         {
             Debug.WriteLine($"({x},{y}) 不在 {bigMapInAllMapRect} 内，继续移动");
             Logger.LogInformation("传送点不在当前大地图范围内，继续移动");
@@ -118,7 +111,7 @@ public class TpTask(CancellationToken ct)
 
         var (clickX, clickY) = ConvertToGameRegionPosition(bigMapInAllMapRect, x, y);
         // 屏蔽左上角350x400区域
-        if (clickX < 250 * _zoomOutMax1080PRatio && clickY < 400 * _zoomOutMax1080PRatio)
+        if (clickX < 350 * _zoomOutMax1080PRatio && clickY < 400 * _zoomOutMax1080PRatio)
         {
             return false;
         }
@@ -152,9 +145,19 @@ public class TpTask(CancellationToken ct)
         return (clickX, clickY);
     }
 
-    public async Task<(double, double)> Tp(double tpX, double tpY, bool force = false)
+    public async Task<(double, double)> Tp(double tpX, double tpY, bool force = false, int initialZoomLevel = 4)
     {
-        // 重试3次
+        // M 打开地图识别当前位置，中心点为当前位置
+        using var ra1 = CaptureToRectArea();
+        if (!Bv.IsInBigMapUi(ra1))
+        {
+            Simulation.SendInput.Keyboard.KeyPress(User32.VK.VK_M);
+            await Delay(1000, ct);
+        }
+
+        await AdjustMapZoomLevel(initialZoomLevel);
+        currentZoomLevel = initialZoomLevel;
+        Logger.LogInformation($"调整缩放等级为{initialZoomLevel}，地图移动过程中不要操作鼠标中键。");
         for (var i = 0; i < 3; i++)
         {
             try
@@ -183,84 +186,170 @@ public class TpTask(CancellationToken ct)
     /// 移动地图到指定传送点位置
     /// 可能会移动不对，所以可以重试此方法
     /// </summary>
-    /// <param name="x"></param>
-    /// <param name="y"></param>
-    public async Task MoveMapTo(double x, double y)
+    /// <param name="x">目标x坐标</param>
+    /// <param name="y">目标y坐标</param>
+    /// <param name="tolerance">允许误差，默认100.0</param>
+    /// <param name="maxIterations">最大尝试次数，默认30</param>
+    public async Task MoveMapTo(double x, double y, double tolerance = 100.0, int maxIterations = 30)
     {
-        var bigMapCenterPoint = GetPositionFromBigMap();
-        // 移动部分内容测试移动偏移
+        // 获取当前地图中心点并计算到目标传送点的初始偏移
+        // await AdjustMapZoomLevel(mapZoomLevel);
+        var bigMapCenterPoint = GetPositionFromBigMap(); // 初始中心
+        var newBigMapCenterPoint = bigMapCenterPoint;
         var (xOffset, yOffset) = (x - bigMapCenterPoint.X, y - bigMapCenterPoint.Y);
-
-        var diffMouseX = 200; // 每次移动的距离
-        if (xOffset < 0)
+        // double distance = Math.Sqrt(xOffset * xOffset + yOffset * yOffset);        
+        int moveMouseX = 100 * Math.Sign(xOffset);
+        int moveMouseY = 100 * Math.Sign(yOffset);
+        int moveSteps = 10;
+        double totalMoveMouseX = Double.MaxValue;
+        double totalMoveMouseY = Double.MaxValue;
+        for (int iteration = 0; iteration < maxIterations; iteration++)
         {
-            diffMouseX = -diffMouseX;
-        }
+            // 移动鼠标
+            await MouseMoveMap(moveMouseX, moveMouseY, moveSteps);
 
-        var diffMouseY = 200; // 每次移动的距离
-        if (yOffset < 0)
-        {
-            diffMouseY = -diffMouseY;
-        }
-
-        // 先移动到屏幕中心附近随机点位置，避免地图移动无效
-        await MouseMoveMapX(diffMouseX);
-        await MouseMoveMapY(diffMouseY);
-        var newBigMapCenterPoint = GetPositionFromBigMap();
-        var diffMapX = Math.Abs(newBigMapCenterPoint.X - bigMapCenterPoint.X);
-        var diffMapY = Math.Abs(newBigMapCenterPoint.Y - bigMapCenterPoint.Y);
-        Debug.WriteLine($"每单位移动的地图距离：({diffMapX},{diffMapY})");
-
-        // 快速移动到目标传送点所在的区域
-        if (diffMapX > 10 && diffMapY > 10)
-        {
-            // // 计算需要移动的次数
-            var moveCount = (int)Math.Abs(xOffset / diffMapX); // 向下取整 本来还要加1的，但是已经移动了一次了
-            Debug.WriteLine("X需要移动的次数：" + moveCount);
-            for (var i = 0; i < moveCount; i++)
+            bigMapCenterPoint = newBigMapCenterPoint; // 保存上一次移动的数据
+            try
             {
-                await MouseMoveMapX(diffMouseX);
+                newBigMapCenterPoint = GetPositionFromBigMap(); // 随循环更新的地图中心
+            }
+            catch (Exception)
+            {
+                newBigMapCenterPoint = new Point2f(
+                    (float)(bigMapCenterPoint.X + xOffset * moveMouseX / totalMoveMouseX),
+                    (float)(bigMapCenterPoint.Y + yOffset * moveMouseY / totalMoveMouseY)
+                );
+                // 利用移动鼠标的距离获取新的中心
             }
 
-            moveCount = (int)Math.Abs(yOffset / diffMapY); // 向下取整 本来还要加1的，但是已经移动了一次了
-            Debug.WriteLine("Y需要移动的次数：" + moveCount);
-            for (var i = 0; i < moveCount; i++)
+            // 本次移动的距离
+            double diffMapX = Math.Abs(newBigMapCenterPoint.X - bigMapCenterPoint.X);
+            double diffMapY = Math.Abs(newBigMapCenterPoint.Y - bigMapCenterPoint.Y);
+            double moveDistance = Math.Sqrt(diffMapX * diffMapX + diffMapY * diffMapY);
+
+            if (moveDistance > 10) // 移动距离大于10认为本次移动成功
             {
-                await MouseMoveMapY(diffMouseY);
+                (xOffset, yOffset) = (x - newBigMapCenterPoint.X, y - newBigMapCenterPoint.Y); // 更新目标偏移量
+                totalMoveMouseX = Math.Abs(moveMouseX * xOffset / diffMapX);
+                totalMoveMouseY = Math.Abs(moveMouseY * yOffset / diffMapY);
+                double mouseDistance = Math.Sqrt(totalMoveMouseX * totalMoveMouseX + totalMoveMouseY * totalMoveMouseY);
+                // 调整地图缩放
+                // mapZoomLevel<5 才显示传送锚点和秘境;
+                // mapZoomLevel<3 是为了避免部分锚点过于接近导致选错锚点；
+                // 风龙废墟无法避免，但是目前没有风龙废墟的脚本吧。:)
+                // https://github.com/babalae/better-genshin-impact/issues/318
+                if (mouseDistance < tolerance && currentZoomLevel < 3)
+                {
+                    Debug.WriteLine($"在 {iteration} 迭代后，已经接近目标点，不再进一步调整。");
+                    break;
+                }
+
+                while (mouseDistance < 200 && currentZoomLevel > 2)
+                {
+                    // 放大地图
+                    await AdjustMapZoomLevel(true);
+                    totalMoveMouseX *= (currentZoomLevel) / (currentZoomLevel - 1);
+                    totalMoveMouseY *= (currentZoomLevel) / (currentZoomLevel - 1);
+                    mouseDistance *= (currentZoomLevel) / (currentZoomLevel - 1);
+                    currentZoomLevel--;
+                }
+
+                // 单次移动最大距离为 250，
+                moveMouseX = (int)Math.Min(totalMoveMouseX, 250 * totalMoveMouseX / mouseDistance) * Math.Sign(xOffset);
+                moveMouseY = (int)Math.Min(totalMoveMouseY, 250 * totalMoveMouseY / mouseDistance) * Math.Sign(yOffset);
+                double moveMouseLength = Math.Sqrt(moveMouseX * moveMouseX + moveMouseY * moveMouseY);
+                moveSteps = Math.Max((int)moveMouseLength / 10, 1);
+            }
+            else
+            {
+                Logger.LogDebug("鼠标无法移动地图，请检查！");
             }
         }
     }
 
-    public async Task MouseMoveMapX(int dx)
+
+    /// <summary>
+    /// 调整地图缩放级别以加速移动
+    /// </summary>
+    /// <param name="zoomIn">是否放大地图</param>
+    /// <param name="zoomLevel">缩放等级：1-6，整数，随着数字变大地图越小，细节越少。</param>
+    public async Task AdjustMapZoomLevel(bool zoomIn)
     {
-        var moveUnit = dx > 0 ? 20 : -20;
-        GameCaptureRegion.GameRegionMove((rect, _) => (rect.Width / 2d + Random.Shared.Next(-rect.Width / 6, rect.Width / 6), rect.Height / 2d + Random.Shared.Next(-rect.Height / 6, rect.Height / 6)));
-        Simulation.SendInput.Mouse.LeftButtonDown();
-        await Delay(200, ct);
-        for (var i = 0; i < dx / moveUnit; i++)
+        if (zoomIn)
         {
-            Simulation.SendInput.Mouse.MoveMouseBy(moveUnit, 0).Sleep(60); // 60 保证没有惯性
+            GameCaptureRegion.GameRegionClick((rect, scale) => (50 * scale, 430 * scale));
+        }
+        else
+        {
+            GameCaptureRegion.GameRegionClick((rect, scale) => (50 * scale, 650 * scale));
+        }
+
+        await Delay(50, ct);
+    }
+
+    public async Task AdjustMapZoomLevel(int zoomLevel)
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            await AdjustMapZoomLevel(false);
+        }
+
+        await Delay(200, ct);
+        for (int i = 0; i < 6 - zoomLevel; i++)
+        {
+            await AdjustMapZoomLevel(true);
+        }
+    }
+
+    public async Task MouseMoveMap(int pixelDeltaX, int pixelDeltaY, int steps = 10, int stepIntervalMilliseconds = 10)
+    {
+        // 确保不影响总移动距离
+        double totalX = 0;
+        double totalY = 0;
+
+        // 梯形缩放因子
+        double scaleFactor = 0.75;
+
+        // 计算每一步的位移，从steps/2逐渐减小到0
+        int[] stepX = new int[steps];
+        int[] stepY = new int[steps];
+        for (int i = 0; i < steps; i++)
+        {
+            double factor = ((double)(steps - Math.Max(i, steps / 2)) / (steps / 2)) * scaleFactor; // 从steps/2逐渐减小到0
+            stepX[i] = (int)(pixelDeltaX * factor / steps);
+            stepY[i] = (int)(pixelDeltaY * factor / steps);
+            totalX += stepX[i];
+            totalY += stepY[i];
+        }
+
+        // 均匀分配多余的部分到前半段
+        int remainingX = (int)(pixelDeltaX - totalX);
+        int remainingY = (int)(pixelDeltaY - totalY);
+        for (int i = 0; i < steps / 2; i++)
+        {
+            stepX[i] += remainingX / (steps / 2);
+            stepY[i] += remainingY / (steps / 2);
+        }
+
+        // 修正剩余误差到中间
+        stepX[steps / 2] += remainingX % (steps / 2);
+        stepY[steps / 2] += remainingY % (steps / 2);
+
+        // 随机起点以避免地图移动无效
+        GameCaptureRegion.GameRegionMove((rect, _) =>
+            (rect.Width / 2d + Random.Shared.Next(-rect.Width / 6, rect.Width / 6),
+                rect.Height / 2d + Random.Shared.Next(-rect.Height / 6, rect.Height / 6)));
+
+        Simulation.SendInput.Mouse.LeftButtonDown();
+        for (var i = 0; i < steps; i++)
+        {
+            Simulation.SendInput.Mouse.MoveMouseBy(stepX[i], stepY[i]);
+            await Delay(stepIntervalMilliseconds, ct);
         }
 
         Simulation.SendInput.Mouse.LeftButtonUp();
-        await Delay(200, ct);
     }
 
-    public async Task MouseMoveMapY(int dy)
-    {
-        var moveUnit = dy > 0 ? 20 : -20;
-        GameCaptureRegion.GameRegionMove((rect, _) => (rect.Width / 2d + Random.Shared.Next(-rect.Width / 6, rect.Width / 6), rect.Height / 2d + Random.Shared.Next(-rect.Height / 6, rect.Height / 6)));
-        Simulation.SendInput.Mouse.LeftButtonDown();
-        await Delay(200, ct);
-        // 原神地图在小范围内移动是无效的，所以先随便移动一下，所以肯定少移动一次
-        for (var i = 0; i < dy / moveUnit; i++)
-        {
-            Simulation.SendInput.Mouse.MoveMouseBy(0, moveUnit).Sleep(60);
-        }
-
-        Simulation.SendInput.Mouse.LeftButtonUp();
-        await Delay(200, ct);
-    }
 
     public Point2f GetPositionFromBigMap()
     {
@@ -342,12 +431,13 @@ public class TpTask(CancellationToken ct)
     /// <param name="x"></param>
     /// <param name="y"></param>
     /// <returns></returns>
-    public (double x, double y) GetRecentlyTpPoint(double x, double y)
+    public (double x, double y, string? country) GetRecentlyTpPoint(double x, double y)
     {
         double recentX = 0;
         double recentY = 0;
+        string? country = "";
         var minDistance = double.MaxValue;
-        foreach (var tpPosition in MapAssets.Instance.TpPositions)
+        foreach (var tpPosition in MapLazyAssets.Instance.TpPositions)
         {
             var distance = Math.Sqrt(Math.Pow(tpPosition.X - x, 2) + Math.Pow(tpPosition.Y - y, 2));
             if (distance < minDistance)
@@ -355,13 +445,15 @@ public class TpTask(CancellationToken ct)
                 minDistance = distance;
                 recentX = tpPosition.X;
                 recentY = tpPosition.Y;
+                country = tpPosition.Country;
             }
         }
 
-        return (recentX, recentY);
+        // todo: 识别当前国家
+        return (recentX, recentY, country);
     }
 
-    public async Task<bool> SwitchRecentlyCountryMap(double x, double y)
+    public async Task<bool> SwitchRecentlyCountryMap(double x, double y, string? forceCountry = null)
     {
         // 可能是地下地图，切换到地上地图
         using var ra2 = CaptureToRectArea();
@@ -380,10 +472,15 @@ public class TpTask(CancellationToken ct)
             var bigMapCenterPoint = bigMapCenterPointNullable.Value;
             Logger.LogDebug("识别当前大地图位置：{Pos}", bigMapCenterPoint);
             minDistance = Math.Sqrt(Math.Pow(bigMapCenterPoint.X - x, 2) + Math.Pow(bigMapCenterPoint.Y - y, 2));
+            if (minDistance < 50)
+            {
+                // 点位很近的情况下不切换
+                return false;
+            }
         }
 
-        var minCountry = "当前位置";
-        foreach (var (country, position) in MapAssets.Instance.CountryPositions)
+        string minCountry = "当前位置";
+        foreach (var (country, position) in MapLazyAssets.Instance.CountryPositions)
         {
             var distance = Math.Sqrt(Math.Pow(position[0] - x, 2) + Math.Pow(position[1] - y, 2));
             if (distance < minDistance)
@@ -396,6 +493,11 @@ public class TpTask(CancellationToken ct)
         Logger.LogDebug("离目标传送点最近的区域是：{Country}", minCountry);
         if (minCountry != "当前位置")
         {
+            if (forceCountry != null)
+            {
+                minCountry = forceCountry;
+            }
+
             GameCaptureRegion.GameRegionClick((rect, scale) => (rect.Width - 160 * scale, rect.Height - 60 * scale));
             await Delay(300, ct);
             var ra = CaptureToRectArea();
@@ -412,6 +514,7 @@ public class TpTask(CancellationToken ct)
 
         return false;
     }
+
 
     public async Task Tp(string name)
     {
@@ -519,5 +622,24 @@ public class TpTask(CancellationToken ct)
         }
 
         return hasMapChooseIcon;
+    }
+
+    /// <summary>
+    /// 给定的映射关系可以表示成 (x, y) 对的形式，其中 x 是输入值，y 是输出值
+    ///    1 - 1
+    ///  0.8 - 2
+    ///  0.6 - 3
+    ///  0.4 - 4
+    ///  0.2 - 5
+    ///    0 - 6
+    /// y=−5x+6
+    /// </summary>
+    /// <param name="region"></param>
+    /// <returns></returns>
+    private int GetBigMapZoomLevel(ImageRegion region)
+    {
+        var s = Bv.GetBigMapScale(region);
+        // 1~6 的缩放等级
+        return (int)(-5 * s) + 6;
     }
 }

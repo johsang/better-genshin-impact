@@ -23,10 +23,16 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using BetterGenshinImpact.GameTask;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
 using Wpf.Ui.Violeta.Controls;
 using StackPanel = Wpf.Ui.Controls.StackPanel;
+using System.Windows.Navigation;
+using Newtonsoft.Json.Linq;
+using static Vanara.PInvoke.User32;
+using TextBox = Wpf.Ui.Controls.TextBox;
+using BetterGenshinImpact.ViewModel.Pages.View;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
@@ -88,6 +94,54 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
             else
             {
                 ScriptGroups.Add(new ScriptGroup { Name = str });
+            }
+        }
+    }
+    [RelayCommand]
+    private void ClearTasks()
+    {
+        SelectedScriptGroup.Projects.Clear();
+        WriteScriptGroup(SelectedScriptGroup);
+    }
+    private void UpdateTasks()
+    {
+        //PromptDialog.Prompt
+       // SelectedScriptGroup.Projects.Clear();
+       // WriteScriptGroup(SelectedScriptGroup);
+    }
+    
+    [RelayCommand]
+    public void OnRenameScriptGroup(ScriptGroup? item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        var str = PromptDialog.Prompt("请输入配置组名称", "重命名配置组", item.Name);
+        if (!string.IsNullOrEmpty(str))
+        {
+            if (item.Name == str)
+            {
+                return;
+            }
+
+            // 检查是否已存在
+            if (ScriptGroups.Any(x => x.Name == str))
+            {
+                _snackbarService.Show(
+                    "配置组已存在",
+                    $"配置组 {str} 已经存在，重命名失败",
+                    ControlAppearance.Caution,
+                    null,
+                    TimeSpan.FromSeconds(2)
+                );
+            }
+            else
+            {
+                File.Move(Path.Combine(ScriptGroupPath, $"{item.Name}.json"), Path.Combine(ScriptGroupPath, $"{str}.json"));
+                item.Name = str;
+                WriteScriptGroup(item);
             }
         }
     }
@@ -162,6 +216,7 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
         }
     }
 
+
     [RelayCommand]
     private void OnAddPathing()
     {
@@ -178,7 +233,14 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
     private ScrollViewer CreatePathingScriptSelectionPanel(IEnumerable<FileTreeNode<PathingTask>> list)
     {
         var stackPanel = new StackPanel();
-        AddNodesToPanel(stackPanel, list, 0);
+        var filterTextBox = new TextBox
+        {
+            Margin = new Thickness(0, 0, 0, 10),
+            PlaceholderText = "输入筛选条件..."
+        };
+        filterTextBox.TextChanged += (s, e) => ApplyFilter(stackPanel, list, filterTextBox.Text);
+        stackPanel.Children.Add(filterTextBox);
+        AddNodesToPanel(stackPanel, list, 0, filterTextBox.Text);
 
         var scrollViewer = new ScrollViewer
         {
@@ -190,10 +252,25 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
         return scrollViewer;
     }
 
-    private void AddNodesToPanel(StackPanel parentPanel, IEnumerable<FileTreeNode<PathingTask>> nodes, int depth)
+    private void ApplyFilter(StackPanel parentPanel, IEnumerable<FileTreeNode<PathingTask>> nodes, string filter)
+    {
+        if (parentPanel.Children.Count > 0 && parentPanel.Children[0] is TextBox filterTextBox)
+        {
+            parentPanel.Children.Clear();
+            parentPanel.Children.Add(filterTextBox); // 保留筛选框
+            AddNodesToPanel(parentPanel, nodes, 0, filter);
+        }
+    }
+
+    private void AddNodesToPanel(StackPanel parentPanel, IEnumerable<FileTreeNode<PathingTask>> nodes, int depth, string filter)
     {
         foreach (var node in nodes)
         {
+            if (depth == 0 && !string.IsNullOrEmpty(filter) && !node.FileName.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var checkBox = new CheckBox
             {
                 Content = node.FileName,
@@ -204,11 +281,19 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
             if (node.IsDirectory)
             {
                 var childPanel = new StackPanel();
-                AddNodesToPanel(childPanel, node.Children, depth + 1); // 递归调用时深度加1
+                AddNodesToPanel(childPanel, node.Children, depth + 1, filter);
+
+                var expander = new Expander
+                {
+                    Header = checkBox,
+                    Content = childPanel,
+                    IsExpanded = false // 默认不展开
+                };
+
                 checkBox.Checked += (s, e) => SetChildCheckBoxesState(childPanel, true);
                 checkBox.Unchecked += (s, e) => SetChildCheckBoxesState(childPanel, false);
-                parentPanel.Children.Add(checkBox);
-                parentPanel.Children.Add(childPanel);
+
+                parentPanel.Children.Add(expander);
             }
             else
             {
@@ -225,8 +310,13 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
             {
                 checkBox.IsChecked = state;
             }
-            else if (child is StackPanel nestedStackPanel)
+            else if (child is Expander expander && expander.Content is StackPanel nestedStackPanel)
             {
+                if (expander.Header is CheckBox headerCheckBox)
+                {
+                    headerCheckBox.IsChecked = state;
+                }
+
                 SetChildCheckBoxesState(nestedStackPanel, state);
             }
         }
@@ -245,9 +335,9 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
                     SelectedScriptGroup?.AddProject(ScriptGroupProject.BuildPathingProject(fileInfo.Name, relativePath));
                 }
             }
-            else if (child is StackPanel childStackPanel)
+            else if (child is Expander { Content: StackPanel nestedStackPanel })
             {
-                AddSelectedPathingScripts(childStackPanel);
+                AddSelectedPathingScripts(nestedStackPanel);
             }
         }
     }
@@ -302,6 +392,30 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
         // {
         //     WriteScriptGroup(group);
         // }
+    }
+
+    [RelayCommand]
+    private void AddNextFlag(ScriptGroupProject? item)
+    {
+        if (item == null)
+        {
+            return;
+        }
+
+        List<ValueTuple<string, int, string, string>> nextScheduledTask = TaskContext.Instance().Config.NextScheduledTask;
+        var nst = nextScheduledTask.Find(item2 => item2.Item1 == SelectedScriptGroup?.Name);
+        if (nst != default)
+        {
+            nextScheduledTask.Remove(nst);
+        }
+
+        nextScheduledTask.Add((SelectedScriptGroup?.Name, item.Index, item.FolderName, item.Name));
+        foreach (var item1 in SelectedScriptGroup.Projects)
+        {
+            item1.NextFlag = false;
+        }
+
+        item.NextFlag = true;
     }
 
     public static void ShowEditWindow(object viewModel)
@@ -498,6 +612,21 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
                 {
                     var json = File.ReadAllText(file);
                     var group = ScriptGroup.FromJson(json);
+
+
+                    var nst = TaskContext.Instance().Config.NextScheduledTask.Find(item => item.Item1 == group.Name);
+                    foreach (var item in group.Projects)
+                    {
+                        item.NextFlag = false;
+                        if (nst != default)
+                        {
+                            if (nst.Item2 == item.Index && nst.Item3 == item.FolderName && nst.Item4 == item.Name)
+                            {
+                                item.NextFlag = true;
+                            }
+                        }
+                    }
+
                     groups.Add(group);
                 }
                 catch (Exception e)
@@ -536,7 +665,7 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
     [RelayCommand]
     public void OnGoToScriptGroupUrl()
     {
-        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/autos/dispatcher.html") { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/feats/autos/dispatcher.html") { UseShellExecute = true });
     }
 
     [RelayCommand]
@@ -579,7 +708,8 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
             return;
         }
 
-        await _scriptService.RunMulti(SelectedScriptGroup.Projects, SelectedScriptGroup.Name);
+        RunnerContext.Instance.Reset();
+        await _scriptService.RunMulti(GetNextProjects(SelectedScriptGroup), SelectedScriptGroup.Name);
     }
 
     [RelayCommand]
@@ -601,7 +731,7 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
         var dialogWindow = new Window
         {
             Title = "配置组设置",
-            Content = new ScriptGroupConfigView(SelectedScriptGroup.Config),
+            Content = new ScriptGroupConfigView(new ScriptGroupConfigViewModel(TaskContext.Instance().Config, SelectedScriptGroup.Config)),
             SizeToContent = SizeToContent.WidthAndHeight,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
         };
@@ -620,6 +750,51 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
         // }
 
         WriteScriptGroup(SelectedScriptGroup);
+    }
+
+    public static List<ScriptGroupProject> GetNextProjects(ScriptGroup group)
+    {
+        List<ScriptGroupProject> ls = new List<ScriptGroupProject>();
+        bool start = false;
+        foreach (var item in group.Projects)
+        {
+            if (item.NextFlag ?? false)
+            {
+                start = true;
+            }
+
+            if (start)
+            {
+                ls.Add(item);
+            }
+        }
+
+        if (!start)
+        {
+            ls.AddRange(group.Projects);
+        }
+
+        //拿出来后清空，和置状态
+        if (start)
+        {
+            List<ValueTuple<string, int, string, string>> nextScheduledTask = TaskContext.Instance().Config.NextScheduledTask;
+            foreach (var item in nextScheduledTask)
+            {
+                if (item.Item1 == group.Name)
+                {
+                    nextScheduledTask.Remove(item);
+                    break;
+                }
+            }
+
+            foreach (var item in group.Projects)
+            {
+                item.NextFlag = false;
+            }
+        }
+
+
+        return ls;
     }
 
     [RelayCommand]
@@ -692,11 +867,14 @@ public partial class ScriptControlViewModel : ObservableObject, INavigationAware
 
             _logger.LogInformation("开始连续执行选中配置组:{Names}", string.Join(",", selectedGroups.Select(x => x.Name)));
 
+            RunnerContext.Instance.IsContinuousRunGroup = true;
             foreach (var scriptGroup in selectedGroups)
             {
-                await _scriptService.RunMulti(scriptGroup.Projects, scriptGroup.Name);
+                await _scriptService.RunMulti(GetNextProjects(scriptGroup), scriptGroup.Name);
                 await Task.Delay(2000);
             }
+
+            RunnerContext.Instance.Reset();
         }
     }
 }

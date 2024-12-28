@@ -14,15 +14,18 @@ using BetterGenshinImpact.View.Pages;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Windows.System;
+using BetterGenshinImpact.GameTask.Common.Element.Assets;
 using BetterGenshinImpact.GameTask.Model.Enum;
 using Wpf.Ui;
 using Wpf.Ui.Controls;
 using Wpf.Ui.Violeta.Controls;
+using BetterGenshinImpact.ViewModel.Pages.View;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
 
@@ -36,8 +39,8 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     private CancellationTokenSource? _cts;
     private static readonly object _locker = new();
 
-    [ObservableProperty]
-    private string[] _strategyList;
+   // [ObservableProperty]
+   // private string[] _strategyList;
 
     [ObservableProperty]
     private bool _switchAutoGeniusInvokationEnabled;
@@ -57,8 +60,8 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [ObservableProperty]
     private string _switchAutoWoodButtonText = "启动";
 
-    [ObservableProperty]
-    private string[] _combatStrategyList;
+    //[ObservableProperty]
+    //private string[] _combatStrategyList;
 
     [ObservableProperty]
     private int _autoDomainRoundNum;
@@ -84,15 +87,28 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [ObservableProperty]
     private string _switchAutoMusicGameButtonText = "启动";
 
+    [ObservableProperty]
+    private List<string> _domainNameList;
+
+    [ObservableProperty]
+    private List<string> _artifactSalvageStarList = ["4", "3", "2", "1"];
+
+    [ObservableProperty]
+    private AutoFightViewModel? _autoFightViewModel;
+
     public TaskSettingsPageViewModel(IConfigService configService, INavigationService navigationService, TaskTriggerDispatcher taskTriggerDispatcher)
     {
         Config = configService.Get();
         _navigationService = navigationService;
         _taskDispatcher = taskTriggerDispatcher;
 
-        _strategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
+        //_strategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
 
-        _combatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+        //_combatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
+
+        _domainNameList = MapLazyAssets.Instance.DomainNameList;
+        _autoFightViewModel=new AutoFightViewModel(Config);
+
     }
 
     private string[] LoadCustomScript(string folder)
@@ -132,16 +148,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     private void OnStrategyDropDownOpened(string type)
     {
-        switch (type)
-        {
-            case "Combat":
-                CombatStrategyList = ["根据队伍自动选择", .. LoadCustomScript(Global.Absolute(@"User\AutoFight"))];
-                break;
-
-            case "GeniusInvocation":
-                StrategyList = LoadCustomScript(Global.Absolute(@"User\AutoGeniusInvokation"));
-                break;
-        }
+        _autoFightViewModel.OnStrategyDropDownOpened(type);
     }
 
     public void OnNavigatedTo()
@@ -196,7 +203,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoGeniusInvokationUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/doc.html#%E8%87%AA%E5%8A%A8%E4%B8%83%E5%9C%A3%E5%8F%AC%E5%94%A4"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/tcg.html"));
     }
 
     [RelayCommand]
@@ -211,7 +218,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoWoodUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/felling.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/felling.html"));
     }
 
     [RelayCommand]
@@ -222,11 +229,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
             return;
         }
 
-        var param = new AutoFightParam(path)
-        {
-            FightFinishDetectEnabled = Config.AutoFightConfig.FightFinishDetectEnabled,
-            PickDropsAfterFightEnabled = Config.AutoFightConfig.PickDropsAfterFightEnabled
-        };
+        var param = new AutoFightParam(path, Config.AutoFightConfig);
 
         SwitchAutoFightEnabled = true;
         await new TaskRunner(DispatcherTimerOperationEnum.UseCacheImageWithTrigger)
@@ -237,7 +240,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoFightUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/domain.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/domain.html"));
     }
 
     [RelayCommand]
@@ -274,13 +277,13 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoDomainUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/domain.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/domain.html"));
     }
 
     [RelayCommand]
     public void OnOpenFightFolder()
     {
-        Process.Start("explorer.exe", Global.Absolute(@"User\AutoFight\"));
+       _autoFightViewModel.OnOpenFightFolder();
     }
 
     [Obsolete]
@@ -315,7 +318,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoTrackUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/track.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/track.html"));
     }
 
     [Obsolete]
@@ -350,7 +353,7 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoTrackPathUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/track.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/track.html"));
     }
 
     [RelayCommand]
@@ -363,6 +366,12 @@ public partial class TaskSettingsPageViewModel : ObservableObject, INavigationAw
     [RelayCommand]
     public async Task OnGoToAutoMusicGameUrlAsync()
     {
-        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/music.html"));
+        await Launcher.LaunchUriAsync(new Uri("https://bgi.huiyadan.com/feats/task/music.html"));
+    }
+    
+    [RelayCommand]
+    public void OnOpenLocalScriptRepo()
+    {
+        _autoFightViewModel.OnOpenLocalScriptRepo();
     }
 }

@@ -1,9 +1,12 @@
-﻿using BetterGenshinImpact.GameTask.AutoFight.Model;
+﻿using System.Collections.Generic;
+using BetterGenshinImpact.GameTask.AutoFight.Model;
 using BetterGenshinImpact.Model;
 using Microsoft.Extensions.Logging;
 using System.Threading;
 using System.Threading.Tasks;
+using BetterGenshinImpact.GameTask.AutoPathing.Suspend;
 using BetterGenshinImpact.GameTask.Common.Job;
+using OpenCvSharp;
 using Wpf.Ui.Controls;
 using static BetterGenshinImpact.GameTask.Common.TaskControl;
 
@@ -14,6 +17,21 @@ namespace BetterGenshinImpact.GameTask;
 /// </summary>
 public class RunnerContext : Singleton<RunnerContext>
 {
+    /// <summary>
+    /// 是否是连续执行配置组的场景
+    /// </summary>
+    public bool IsContinuousRunGroup { get; set; }
+    
+    /// <summary>
+    /// 暂停逻辑
+    /// </summary>
+    public bool IsSuspend { get; set; }
+    
+    /// <summary>
+    /// 暂停实现
+    /// </summary>
+    public Dictionary<string, ISuspendable> SuspendableDictionary = new();
+
     /// <summary>
     /// 当前使用队伍名称
     /// 游戏内定义的队伍名称
@@ -42,6 +60,7 @@ public class RunnerContext : Singleton<RunnerContext>
                 _combatScenes = null;
             }
         }
+
         return _combatScenes;
     }
 
@@ -50,9 +69,31 @@ public class RunnerContext : Singleton<RunnerContext>
         _combatScenes = null;
     }
 
+    /// <summary>
+    /// 任务结束后的清理
+    /// </summary>
     public void Clear()
     {
+        // 连续执行配置组的情况下，不清理当前队伍
+        if (!IsContinuousRunGroup)
+        {
+            PartyName = null;
+        }
+
+        _combatScenes = null;
+        IsSuspend = false;
+        SuspendableDictionary.Clear();
+    }
+
+    /// <summary>
+    /// 彻底恢复到初始状态
+    /// </summary>
+    public void Reset()
+    {
+        IsContinuousRunGroup = false;
         PartyName = null;
         _combatScenes = null;
+        IsSuspend = false;
+        SuspendableDictionary.Clear();
     }
 }

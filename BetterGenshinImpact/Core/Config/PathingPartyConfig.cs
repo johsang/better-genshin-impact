@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+using BetterGenshinImpact.GameTask;
+using BetterGenshinImpact.GameTask.AutoFight;
 
 namespace BetterGenshinImpact.Core.Config;
 
@@ -54,4 +56,34 @@ public partial class PathingPartyConfig : ObservableObject
 
     [JsonIgnore]
     public List<string> AvatarIndexList { get; } = ["", "1", "2", "3", "4"];
+
+    // 只在传送传送点时复活
+    [ObservableProperty]
+    private bool _onlyInTeleportRecover = false;
+    
+    // 使用小道具的间隔时间
+    [ObservableProperty]
+    private int _useGadgetIntervalMs = 0;
+
+    // 启用进入剧情自动脱离
+    [ObservableProperty]
+    private bool _autoSkipEnabled = true;
+
+    //启用自动战斗配置
+    [ObservableProperty]
+    private bool _autoFightEabled = false;
+
+    [ObservableProperty]
+    private AutoFightConfig _autoFightConfig = new();
+
+    public static PathingPartyConfig BuildDefault()
+    {
+        // 即便是不启用的情况下也设置默认值，减少后续使用的判断
+        var pathingConditionConfig = TaskContext.Instance().Config.PathingConditionConfig;
+        return new PathingPartyConfig
+        {
+            OnlyInTeleportRecover = pathingConditionConfig.OnlyInTeleportRecover,
+            UseGadgetIntervalMs = pathingConditionConfig.UseGadgetIntervalMs
+        };
+    }
 }

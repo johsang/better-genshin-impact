@@ -62,6 +62,7 @@ public partial class ScriptGroupProject : ObservableObject
     [JsonIgnore]
     public ScriptProject? Project { get; set; }
 
+
     public ExpandoObject? JsScriptSettingsObject { get; set; }
 
     /// <summary>
@@ -69,6 +70,12 @@ public partial class ScriptGroupProject : ObservableObject
     /// </summary>
     [JsonIgnore]
     public ScriptGroup? GroupInfo { get; set; }
+    /// <summary>
+    /// 下一个从此执行标志
+    /// </summary>
+    [JsonIgnore]
+    [ObservableProperty]
+    public bool? _nextFlag = false;
 
     public ScriptGroupProject()
     {
@@ -130,6 +137,7 @@ public partial class ScriptGroupProject : ObservableObject
             {
                 throw new Exception("JS脚本未初始化");
             }
+            JsScriptSettingsObject ??= new ExpandoObject();
             await Project.ExecuteAsync(JsScriptSettingsObject);
         }
         if (Type == "KeyMouse")

@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BetterGenshinImpact.Core.Config;
 using BetterGenshinImpact.GameTask.AutoFight.Config;
 using BetterGenshinImpact.GameTask.AutoGeniusInvokation.Model;
+using BetterGenshinImpact.GameTask.AutoPathing.Model;
 using Microsoft.Extensions.Logging;
 using static BetterGenshinImpact.GameTask.Common.TaskControl;
 
@@ -15,7 +17,7 @@ namespace BetterGenshinImpact.GameTask.AutoPathing.Handler;
 /// </summary>
 public class ElementalCollectHandler(ElementalType elementalType) : IActionHandler
 {
-    public async Task RunAsync(CancellationToken ct)
+    public async Task RunAsync(CancellationToken ct, WaypointForTrack? waypointForTrack = null, object? config = null)
     {
         var combatScenes = await RunnerContext.Instance.GetCombatScenes(ct);
         if (combatScenes == null)
@@ -89,7 +91,7 @@ public class ElementalCollectAvatarConfigs
         // 水
         new ElementalCollectAvatar("芭芭拉", ElementalType.Hydro, true, true),
         new ElementalCollectAvatar("莫娜", ElementalType.Hydro, true, false),
-        new ElementalCollectAvatar("心海", ElementalType.Hydro, true, true),
+        new ElementalCollectAvatar("珊瑚宫心海", ElementalType.Hydro, true, true),
         new ElementalCollectAvatar("玛拉妮", ElementalType.Hydro, true, false),
         new ElementalCollectAvatar("那维莱特", ElementalType.Hydro, true, true),
         new ElementalCollectAvatar("芙宁娜", ElementalType.Hydro, true, false),
@@ -110,7 +112,7 @@ public class ElementalCollectAvatarConfigs
         new ElementalCollectAvatar("鹿野院平藏", ElementalType.Anemo, true, true),
         new ElementalCollectAvatar("流浪者", ElementalType.Anemo, true, false),
         new ElementalCollectAvatar("闲云", ElementalType.Anemo, true, false),
-        new ElementalCollectAvatar("万叶", ElementalType.Anemo, false, true),
+        new ElementalCollectAvatar("枫原万叶", ElementalType.Anemo, false, true),
         new ElementalCollectAvatar("珐露珊", ElementalType.Anemo, false, true),
         new ElementalCollectAvatar("琳妮特", ElementalType.Anemo, false, true),
         new ElementalCollectAvatar("温迪", ElementalType.Anemo, false, true),

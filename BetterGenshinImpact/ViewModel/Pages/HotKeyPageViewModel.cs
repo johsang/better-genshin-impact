@@ -28,7 +28,9 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
-using BetterGenshinImpact.GameTask.AutoGeniusInvokation.Model;
+using BetterGenshinImpact.GameTask.Model.Area;
+using BetterGenshinImpact.GameTask.QuickTeleport.Assets;
+using Vanara.PInvoke;
 using HotKeySettingModel = BetterGenshinImpact.Model.HotKeySettingModel;
 
 namespace BetterGenshinImpact.ViewModel.Pages;
@@ -209,7 +211,13 @@ public partial class HotKeyPageViewModel : ObservableObject, IViewModel
             Config.HotKeyConfig.CancelTaskHotkeyType,
             (_, _) => { CancellationContext.Instance.Cancel(); }
         ));
-
+        systemDirectory.Children.Add(new HotKeySettingModel(
+            "暂停当前脚本/独立任务",
+            nameof(Config.HotKeyConfig.SuspendHotkey),
+            Config.HotKeyConfig.SuspendHotkey,
+            Config.HotKeyConfig.SuspendHotkeyType,
+            (_, _) => { RunnerContext.Instance.IsSuspend = !RunnerContext.Instance.IsSuspend; }
+        ));
         var takeScreenshotHotKeySettingModel = new HotKeySettingModel(
             "游戏截图",
             nameof(Config.HotKeyConfig.TakeScreenshotHotkey),
@@ -550,11 +558,39 @@ public partial class HotKeyPageViewModel : ObservableObject, IViewModel
                 Config.HotKeyConfig.Test1HotkeyType,
                 (_, _) =>
                 {
-                    var handler = new ElementalCollectHandler(ElementalType.Anemo);
-                    handler.RunAsync(new CancellationToken());
+                    // var handler = new ElementalCollectHandler(ElementalType.Anemo);
+                    // handler.RunAsync(new CancellationToken());
+
+                    // var handler = new PickAroundHandler();
+                    // handler.RunAsync(new CancellationToken());
 
                     // SwitchPartyTask switchPartyTask = new SwitchPartyTask();
                     // Task.Run(async () => { await switchPartyTask.Start("三保一", new CancellationToken()); });
+
+                    // GoToAdventurersGuildTask goToAdventurersGuildTask = new GoToAdventurersGuildTask();
+                    // Task.Run(async () => { await goToAdventurersGuildTask.Start("枫丹", new CancellationToken()); });
+
+                    // ArtifactSalvageTask artifactSalvageTask = new ArtifactSalvageTask();
+                    // Task.Run(async () => { await artifactSalvageTask.Start(4, new CancellationToken()); });
+
+                    // 领取纪行奖励
+                    // Task.Run(async () => { await new ClaimBattlePassRewardsTask().Start(new CancellationToken()); });
+
+                    // 领取邮件奖励
+                    // Task.Run(async () => { await new ClaimMailRewardsTask().Start(new CancellationToken()); });
+
+                    // 拾取物品
+                    // Task.Run(async () => { await new ScanPickTask().Start(new CancellationToken()); });
+
+                    // Simulation.SendInput.Keyboard.KeyDown(false, User32.VK.VK_LMENU);
+                    // // TaskContext.Instance().PostMessageSimulator.KeyDown(User32.VK.VK_MENU);
+                    // Thread.Sleep(500);
+                    // GameCaptureRegion.GameRegion1080PPosMove(200, 100);
+                    // Thread.Sleep(500);
+                    // // TaskContext.Instance().PostMessageSimulator.KeyUp(User32.VK.VK_MENU);
+                    // Simulation.SendInput.Keyboard.KeyUp(false, User32.VK.VK_LMENU);
+                    
+                    TaskControl.Logger.LogInformation("大地图界面缩放按钮位置：{Position}", Bv.GetBigMapScale( TaskControl.CaptureToRectArea()));
                 }
             ));
             debugDirectory.Children.Add(new HotKeySettingModel(
@@ -562,7 +598,11 @@ public partial class HotKeyPageViewModel : ObservableObject, IViewModel
                 nameof(Config.HotKeyConfig.Test2Hotkey),
                 Config.HotKeyConfig.Test2Hotkey,
                 Config.HotKeyConfig.Test2HotkeyType,
-                (_, _) => { Simulation.SendInput.Mouse.MoveMouseBy(500, 0); }
+                (_, _) =>
+                {
+                    GoToCraftingBenchTask goToCraftingBenchTask = new GoToCraftingBenchTask();
+                    Task.Run(async () => { await goToCraftingBenchTask.Start("璃月", new CancellationToken()); });
+                }
             ));
 
             debugDirectory.Children.Add(new HotKeySettingModel(

@@ -100,6 +100,12 @@ public partial class JsListViewModel : ObservableObject, INavigationAware, IView
             return;
         }
 
+        if (!string.IsNullOrEmpty(item.Manifest.SettingsUi))
+        {
+            Toast.Information("此脚本存在配置，不配置可能无法正常运行，建议请添加至【调度器】，并右键修改配置后使用！");
+            _logger.LogWarning("此脚本存在配置，可能无法直接从脚本界面运行，建议请添加至【调度器】，并右键修改配置后使用！");
+        }
+
         await _scriptService.RunMulti([new ScriptGroupProject(item)]);
     }
 
@@ -112,7 +118,7 @@ public partial class JsListViewModel : ObservableObject, INavigationAware, IView
     [RelayCommand]
     public void OnGoToJsScriptUrl()
     {
-        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/autos/jsscript.html") { UseShellExecute = true });
+        Process.Start(new ProcessStartInfo("https://bgi.huiyadan.com/feats/autos/jsscript.html") { UseShellExecute = true });
     }
 
     [RelayCommand]
